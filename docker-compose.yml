@@ -1,0 +1,46 @@
+services:
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: smartsave
+      MYSQL_USER: smartsave
+      MYSQL_PASSWORD: smartsave
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    # default-authentication-plugin removed in MySQL 8.4+
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  db-init:
+    image: mysql:8
+    environment:
+      MYSQL_PWD: smartsave
+    volumes:
+      - ./db/schema.sql:/schema.sql
+    command: sh -c "mysql -h mysql -u smartsave smartsave < /schema.sql"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      DATABASE_URL: mysql://smartsave:smartsave@mysql:3306/smartsave
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      NODE_ENV: production
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
