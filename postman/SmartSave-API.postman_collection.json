@@ -1,0 +1,226 @@
+{
+  "info": {
+    "name": "SmartSave API",
+    "description": "Collection to test SmartSave backend APIs. Set baseUrl in collection variables. After Login or Signup, the token is saved automatically for authenticated requests.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "token", "value": "" },
+    { "key": "verificationToken", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Send Verification Code",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"reason\": \"signup\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/verification/send",
+            "description": "Sends OTP to email. Check DB email_validation table for the code (or use email service in production). Rate limited to 3 per minute per email."
+          }
+        },
+        {
+          "name": "Verify Email Code (Signup Flow)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const json = pm.response.json();",
+                  "  if (json.verificationToken) {",
+                  "    pm.collectionVariables.set('verificationToken', json.verificationToken);",
+                  "  }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"code\": \"123456\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/verification/verify",
+            "description": "Signup flow: verify OTP (no verificationToken in body). Returns verificationToken for use in Signup. Replace code with OTP from Send Verification Code or email."
+          }
+        },
+        {
+          "name": "Verify Email Code (Login Flow)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const json = pm.response.json();",
+                  "  if (json.accessToken) {",
+                  "    pm.collectionVariables.set('token', json.accessToken);",
+                  "  }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"jane.doe@example.com\",\n  \"code\": \"123456\",\n  \"verificationToken\": \"{{verificationToken}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/verification/verify",
+            "description": "Login flow: after Login returns Verification_token, send OTP code and verificationToken. Returns accessToken (JWT); saved to token for authenticated requests."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Signup",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const json = pm.response.json();",
+                  "  if (json.data && json.data.token) {",
+                  "    pm.collectionVariables.set('token', json.data.token);",
+                  "  }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Jane Doe\",\n  \"phoneNumber\": \"+1234567890\",\n  \"email\": \"jane.doe@example.com\",\n  \"emailVerificationToken\": \"{{verificationToken}}\",\n  \"password\": \"SecurePassword123!\",\n  \"cardNumber\": \"4111111111111111\",\n  \"cardholderName\": \"JANE DOE\",\n  \"expiryDate\": \"12/28\",\n  \"cvv\": \"123\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/users/signup",
+            "description": "Register user. Use verificationToken from Verify Email Code. Card fields optional. Saves token to collection variable."
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const json = pm.response.json();",
+                  "  if (json.data && json.data.user && json.data.user.Verification_token) {",
+                  "    pm.collectionVariables.set('verificationToken', json.data.user.Verification_token);",
+                  "  }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"jane.doe@example.com\",\n  \"password\": \"SecurePassword123!\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/users/login",
+            "description": "Step 1 of login: validates credentials, sends OTP to email, returns Verification_token. Then call Verify Email Code (Login Flow) with the OTP to get accessToken."
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/users/logout",
+            "description": "Logout. Client should discard the token."
+          }
+        },
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{baseUrl}}/api/v1/users/profile",
+            "description": "Get current user profile, investments, and masked card. Requires auth."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payments",
+      "item": [
+        {
+          "name": "Validate Card",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cardNumber\": \"4111111111111111\",\n  \"cardholderName\": \"JANE DOE\",\n  \"expiryDate\": \"08/29\",\n  \"cvv\": \"123\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/payments/validate-card",
+            "description": "Validates card (Luhn, cardholder name, expiry, CVV). 4111111111111111 is a valid test card number."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Investments",
+      "item": [
+        {
+          "name": "Set Investment Proportion",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"proportions\": [\n    { \"assetId\": \"EQUITY_FUND_01\", \"percentage\": 60 },\n    { \"assetId\": \"GOVT_BOND_02\", \"percentage\": 30 },\n    { \"assetId\": \"CRYPTO_INDEX\", \"percentage\": 10 }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/investments/proportion",
+            "description": "Set allocation. Sum of percentages must equal 100. Asset IDs must exist (EQUITY_FUND_01, GOVT_BOND_02, CRYPTO_INDEX). Requires auth."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/health",
+            "description": "Simple health check."
+          }
+        }
+      ]
+    }
+  ]
+}
