@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const { warn, error: logError, maskObject } = require('../utils/logger');
 
 const OTP_EXPIRY_MINUTES = 10;
 const APP_NAME = process.env.APP_NAME || 'SmartSave';
@@ -41,7 +42,7 @@ async function sendVerificationEmail(email, otp, reason = 'signup') {
     const from = process.env.MAIL_FROM || process.env.SMTP_USER || `noreply@${process.env.SMTP_HOST || 'localhost'}`;
 
     if (!transport) {
-      console.warn('[email] SMTP not configured (SMTP_HOST missing). OTP for %s: %s', email, otp);
+      warn('email SMTP not configured (SMTP_HOST missing), OTP not sent', maskObject({ email }));
       return;
     }
 
@@ -75,7 +76,7 @@ async function sendVerificationEmail(email, otp, reason = 'signup') {
       html,
     });
   } catch (err) {
-    console.error('[email] sendVerificationEmail failed:', err.message);
+    logError('email sendVerificationEmail failed', err.message);
     throw err;
   }
 }
@@ -92,7 +93,7 @@ async function sendPasswordResetEmail(email, resetLink) {
     const from = process.env.MAIL_FROM || process.env.SMTP_USER || `noreply@${process.env.SMTP_HOST || 'localhost'}`;
 
     if (!transport) {
-      console.warn('[email] SMTP not configured. Reset link for %s: %s', email, resetLink);
+      warn('email SMTP not configured, reset link not sent', maskObject({ email }));
       return;
     }
 
@@ -128,7 +129,7 @@ async function sendPasswordResetEmail(email, resetLink) {
       html,
     });
   } catch (err) {
-    console.error('[email] sendPasswordResetEmail failed:', err.message);
+    logError('email sendPasswordResetEmail failed', err.message);
     throw err;
   }
 }

@@ -4,3 +4,6 @@ node_modules/
 .env.local
 .env.*.local
 *.log
+
+# SSL certs (place ca.pem in certs/ and set MYSQL_SSL_CA)
+certs/*.pem
