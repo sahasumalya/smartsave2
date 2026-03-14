@@ -6,4 +6,4 @@ node_modules/
 *.log
 
 # SSL certs (place ca.pem in certs/ and set MYSQL_SSL_CA)
-certs/*.pem
+#certs/*.pem
