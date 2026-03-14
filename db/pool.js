@@ -31,7 +31,7 @@ function parseConnectionString(url) {
       queueLimit: 0,
     };
     const sslMode = u.searchParams.get('ssl-mode') || u.searchParams.get('ssl_mode');
-    if (sslMode && String(sslMode).toUpperCase() === 'REQUIRED') {
+    if (sslMode && String(sslMode).toUpperCase() === 'REQUIRED' && process.env.NODE_ENV === 'development') {
       config.ssl = getSslOptions();
     }
     return config;
