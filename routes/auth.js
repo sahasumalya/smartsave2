@@ -6,6 +6,7 @@ const { pool } = require('../db/pool');
 const { sendVerificationEmail, sendPasswordResetEmail } = require('../services/email');
 const { signToken } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/asyncHandler');
+const { debug, error: logError } = require('../utils/logger');
 
 const SALT_ROUNDS = 10;
 
@@ -110,8 +111,9 @@ router.post(
 
       try {
         await sendVerificationEmail(email, otp, req.body.reason);
+        debug('verification/send OTP sent', { email });
       } catch (err) {
-        console.error('[verification/send] Failed to send email:', err.message);
+        logError('verification/send email failed', err.message);
         return res.status(500).json({
           status: 'error',
           message: 'Failed to send verification email. Please try again later.',
@@ -277,8 +279,9 @@ router.post(
 
         try {
           await sendPasswordResetEmail(email, resetLink);
+          debug('forgot-password reset link sent', { email });
         } catch (err) {
-          console.error('[forgot-password] Failed to send email:', err.message);
+          logError('forgot-password email failed', err.message);
           await client.query('DELETE FROM password_reset_tokens WHERE token = ?', [token]);
           // Still return 200 so we don't reveal that the email exists
         }

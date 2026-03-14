@@ -8,6 +8,7 @@ const { getCardType, validateCard } = require('../utils/cardUtils');
 const { encrypt, decrypt } = require('../utils/encryption');
 const { sendVerificationEmail } = require('../services/email');
 const { asyncHandler } = require('../middleware/asyncHandler');
+const { debug, error: logError } = require('../utils/logger');
 
 const router = express.Router();
 
@@ -171,8 +172,9 @@ router.post('/login', loginValidators, asyncHandler(async (req, res) => {
 
   try {
     await sendVerificationEmail(email, otp, 'sign_in');
+    debug('login OTP sent', { email });
   } catch (err) {
-    console.error('[login] Failed to send OTP email:', err.message);
+    logError('login email failed', err.message);
     return res.status(500).json({
       status: 'error',
       message: 'Failed to send verification code. Please try again later.',
@@ -453,7 +455,7 @@ router.get('/profile', requireAuth(), asyncHandler(async (req, res) => {
       try {
         phoneNumber = decrypt(u.phone_number);
       } catch (err) {
-        console.error('[profile] Failed to decrypt phone_number:', err.message);
+        logError('profile decrypt phone_number failed', err.message);
       }
     }
 
@@ -481,7 +483,7 @@ router.get('/profile', requireAuth(), asyncHandler(async (req, res) => {
           cardholderName = c.cardholder_name_encrypted ? decrypt(c.cardholder_name_encrypted) : null;
           expiryDate = c.expiry_date_encrypted ? decrypt(c.expiry_date_encrypted) : null;
         } catch (err) {
-          console.error('[profile] Failed to decrypt card data:', err.message);
+          logError('profile decrypt card data failed', err.message);
           lastFour = c.last_four;
           cardholderName = c.cardholder_name;
           expiryDate = c.expiry_date;
@@ -517,7 +519,7 @@ router.get('/profile', requireAuth(), asyncHandler(async (req, res) => {
       },
     });
   } catch (err) {
-    console.error(err);
+    logError('profile', err.message);
     throw err;
   }
 }));
