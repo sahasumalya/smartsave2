@@ -43,7 +43,7 @@ describe('POST /api/v1/users/signup', () => {
     bcrypt.hash.mockResolvedValue('$2b$10$mockedhash');
   });
 
-  test('returns 201 with token for valid signup without card', async () => {
+  test('returns 201 with token for valid signup', async () => {
     // 1. emailVerificationToken check
     pool.query.mockResolvedValueOnce({ rows: [{ id: 1 }] });
     // 2. email already exists check
@@ -65,30 +65,6 @@ describe('POST /api/v1/users/signup', () => {
     expect(res.body.data.userId).toBeDefined();
     expect(res.body.data.token).toBeDefined();
     expect(mockClient.release).toHaveBeenCalled();
-  });
-
-  test('returns 201 with token for valid signup with card', async () => {
-    pool.query.mockResolvedValueOnce({ rows: [{ id: 1 }] });  // token check
-    mockClient.query
-      .mockResolvedValueOnce({ rows: [] })   // email exists check
-      .mockResolvedValueOnce({ rows: [] })   // insert user
-      .mockResolvedValueOnce({ rows: [] });  // insert card
-
-    const res = await request(app)
-      .post('/api/v1/users/signup')
-      .send({
-        fullName: 'Jane Doe',
-        email: 'jane@example.com',
-        emailVerificationToken: 'v_tok_abc123',
-        password: 'SecurePass123!',
-        cardNumber: '4111111111111111',
-        cardholderName: 'JANE DOE',
-        expiryDate: FUTURE_EXPIRY,
-        cvv: '123',
-      });
-
-    expect(res.status).toBe(201);
-    expect(res.body.status).toBe('success');
   });
 
   test('returns 400 when emailVerificationToken is not found in DB', async () => {
@@ -162,25 +138,6 @@ describe('POST /api/v1/users/signup', () => {
     expect(res.status).toBe(400);
   });
 
-  test('returns 422 when card data is invalid', async () => {
-    pool.query.mockResolvedValueOnce({ rows: [{ id: 1 }] }); // token check
-
-    const res = await request(app)
-      .post('/api/v1/users/signup')
-      .send({
-        fullName: 'Jane Doe',
-        email: 'jane@example.com',
-        emailVerificationToken: 'v_tok_abc123',
-        password: 'SecurePass123!',
-        cardNumber: '4111111111111112', // fails Luhn
-        cardholderName: 'JANE DOE',
-        expiryDate: FUTURE_EXPIRY,
-        cvv: '123',
-      });
-
-    expect(res.status).toBe(422);
-    expect(res.body.code).toBe('INVALID_CARD_DATA');
-  });
 });
 
 describe('POST /api/v1/users/login', () => {
@@ -302,6 +259,7 @@ describe('GET /api/v1/users/profile', () => {
           last_four: null,
           cardholder_name: null,
           expiry_date: null,
+          is_default: 1,
         }],
       });
 
@@ -317,6 +275,7 @@ describe('GET /api/v1/users/profile', () => {
     expect(res.body.data.investments[0].assetId).toBe('EQUITY_FUND_01');
     expect(res.body.data.paymentMethod.cardType).toBe('Visa');
     expect(res.body.data.paymentMethod.lastFour).toBe('1111');
+    expect(res.body.data.paymentMethod.isDefault).toBe(true);
   });
 
   test('returns 200 with empty investments and null paymentMethod', async () => {

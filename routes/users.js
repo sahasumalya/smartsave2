@@ -30,10 +30,6 @@ const signupValidators = [
   body('email').isEmail().normalizeEmail(),
   body('emailVerificationToken').isString().trim().notEmpty().withMessage('Email must be verified'),
   body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
-  body('cardNumber').optional().isString().trim(),
-  body('cardholderName').optional().isString().trim(),
-  body('expiryDate').optional().isString().trim(),
-  body('cvv').optional().isString().trim(),
 ];
 
 /**
@@ -48,17 +44,7 @@ router.post('/signup', signupValidators, asyncHandler(async (req, res) => {
     });
   }
 
-  const {
-    fullName,
-    phoneNumber,
-    email,
-    emailVerificationToken,
-    password,
-    cardNumber,
-    cardholderName,
-    expiryDate,
-    cvv,
-  } = req.body;
+  const { fullName, phoneNumber, email, emailVerificationToken, password } = req.body;
 
   // Verify email was verified (verification token from /auth/verification/verify)
   const tokenCheck = await pool.query(
@@ -70,23 +56,6 @@ router.post('/signup', signupValidators, asyncHandler(async (req, res) => {
       status: 'error',
       message: 'Email must be verified. Complete verification first.',
     });
-  }
-
-  // Optional card validation if card data provided
-  if (cardNumber || cardholderName || expiryDate || cvv) {
-    const cardResult = validateCard({
-      cardNumber: cardNumber || '',
-      cardholderName: cardholderName || '',
-      expiryDate: expiryDate || '',
-      cvv: cvv || '',
-    });
-    if (!cardResult.valid) {
-      return res.status(422).json({
-        status: 'error',
-        code: 'INVALID_CARD_DATA',
-        errors: cardResult.errors,
-      });
-    }
   }
 
   const client = await pool.connect();
@@ -104,21 +73,6 @@ router.post('/signup', signupValidators, asyncHandler(async (req, res) => {
        VALUES (?, ?, ?, ?, ?)`,
       [userId, fullName, email, phoneNumberEncrypted, passwordHash]
     );
-
-    if (cardNumber && cardholderName && expiryDate && cvv) {
-      const digits = String(cardNumber).replace(/\D/g, '');
-      const cardType = getCardType(digits);
-      const cardId = crypto.randomUUID();
-      const cardNumberEncrypted = encrypt(digits);
-      const cvvEncrypted = encrypt(String(cvv).trim());
-      const cardholderNameEncrypted = encrypt(cardholderName.trim());
-      const expiryDateEncrypted = encrypt(expiryDate.trim());
-      await client.query(
-        `INSERT INTO user_card_information (card_id, user_id, card_number_encrypted, cvv_encrypted, card_type, cardholder_name_encrypted, expiry_date_encrypted)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [cardId, userId, cardNumberEncrypted, cvvEncrypted, cardType, cardholderNameEncrypted, expiryDateEncrypted]
-      );
-    }
 
     const token = signToken({ userId }, '1h');
     return res.status(201).json({
@@ -276,6 +230,7 @@ const addCardValidators = [
   body('cardholderName').isString().trim().notEmpty().withMessage('Cardholder name is required'),
   body('expiryDate').isString().trim().notEmpty().withMessage('Expiry date is required'),
   body('cvv').isString().trim().notEmpty().withMessage('CVV is required'),
+  body('isDefault').optional().isBoolean().withMessage('isDefault must be true or false'),
 ];
 
 const OTP_EXPIRY_MINUTES = 10;
@@ -299,6 +254,7 @@ router.post(
     }
 
     const userId = req.user.userId;
+    const isDefault = req.body.isDefault === true || req.body.isDefault === 'true';
     const { verificationToken, cardNumber, cardholderName, expiryDate, cvv } = req.body;
 
     const userRow = await pool.query(
@@ -404,12 +360,21 @@ router.post(
     const cardholderNameEncrypted = encrypt(cardholderName.trim());
     const expiryDateEncrypted = encrypt(expiryDate.trim());
 
+    const isOnlyCard = existingCards.rows.length === 0;
+    const setAsDefault = isOnlyCard || isDefault;
+
     const client = await pool.connect();
     try {
+      if (setAsDefault) {
+        await client.query(
+          'UPDATE user_card_information SET is_default = 0 WHERE user_id = ?',
+          [userId]
+        );
+      }
       await client.query(
-        `INSERT INTO user_card_information (card_id, user_id, card_number_encrypted, cvv_encrypted, card_type, cardholder_name_encrypted, expiry_date_encrypted)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [cardId, userId, cardNumberEncrypted, cvvEncrypted, cardType, cardholderNameEncrypted, expiryDateEncrypted]
+        `INSERT INTO user_card_information (card_id, user_id, card_number_encrypted, cvv_encrypted, card_type, cardholder_name_encrypted, expiry_date_encrypted, is_default)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [cardId, userId, cardNumberEncrypted, cvvEncrypted, cardType, cardholderNameEncrypted, expiryDateEncrypted, setAsDefault ? 1 : 0]
       );
       await client.query(
         'UPDATE email_validation SET is_used = 1, updated_at = NOW() WHERE id = ?',
@@ -426,7 +391,7 @@ router.post(
     return res.status(201).json({
       status: 'success',
       message: 'Payment method added and verified successfully.',
-      data: { lastFour, cardType },
+      data: { lastFour, cardType, isDefault: setAsDefault },
     });
   })
 );
@@ -469,8 +434,8 @@ router.get('/profile', requireAuth(), asyncHandler(async (req, res) => {
 
     let paymentMethod = null;
     const cardRow = await pool.query(
-      `SELECT card_number_encrypted, cardholder_name_encrypted, expiry_date_encrypted, card_type, last_four, cardholder_name, expiry_date
-       FROM user_card_information WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1`,
+      `SELECT card_number_encrypted, cardholder_name_encrypted, expiry_date_encrypted, card_type, last_four, cardholder_name, expiry_date, is_default
+       FROM user_card_information WHERE user_id = ? ORDER BY is_default DESC, updated_at DESC LIMIT 1`,
       [userId]
     );
     if (cardRow.rows.length > 0) {
@@ -498,6 +463,7 @@ router.get('/profile', requireAuth(), asyncHandler(async (req, res) => {
         cardType: c.card_type ?? null,
         lastFour: lastFour ?? null,
         expiryDate: expiryDate ?? null,
+        isDefault: Number(c.is_default) === 1,
       };
     }
 

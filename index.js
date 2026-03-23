@@ -13,6 +13,7 @@ process.on('unhandledRejection', (reason) => {
 });
 
 const { errorHandler } = require('./middleware/errorHandler');
+const { corsMiddleware } = require('./middleware/corsConfig');
 const authRoutes = require('./routes/auth');
 const usersRoutes = require('./routes/users');
 const paymentsRoutes = require('./routes/payments');
@@ -21,6 +22,7 @@ const investmentsRoutes = require('./routes/investments');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(corsMiddleware);
 app.use(express.json());
 app.use(requestLogger);
 

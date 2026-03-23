@@ -79,15 +79,12 @@ Create an account in three steps: send OTP → verify email → signup with the 
   "phoneNumber": "+1234567890",
   "email": "jane.doe@example.com",
   "emailVerificationToken": "v_tok_abc123...",
-  "password": "SecurePassword123!",
-  "cardNumber": "4111111111111111",
-  "cardholderName": "JANE DOE",
-  "expiryDate": "12/28",
-  "cvv": "123"
+  "password": "SecurePassword123!"
 }
 ```
 - **Required:** `fullName`, `email`, `emailVerificationToken` (from step 2), `password` (min 8 chars).  
-- **Optional:** `phoneNumber`, card fields (`cardNumber`, `cardholderName`, `expiryDate`, `cvv`). If you provide card data, all four card fields are required; the full card number, CVV, cardholder name, and expiry are stored **AES-256 encrypted**. Phone numbers are also stored encrypted.  
+- **Optional:** `phoneNumber` (stored **AES-256 encrypted** when provided).  
+- **Card details:** Not accepted on signup. Add a payment method after login with **POST /api/v1/payments/verify-card-initiate** and **POST /api/v1/users/card**.  
 - If the email is already registered you get **400** – "User with same email id already exists."
 
 **Success (201):**
@@ -292,12 +289,13 @@ No body.
       "cardholderName": "JANE DOE",
       "cardType": "Visa",
       "lastFour": "1111",
-      "expiryDate": "12/28"
+      "expiryDate": "12/28",
+      "isDefault": true
     }
   }
 }
 ```
-- Stored PII (phone, full card number, CVV, cardholder name, expiry) is decrypted when returning the profile; only the last four digits of the card are exposed in `paymentMethod.lastFour`.
+- Stored PII (phone, full card number, CVV, cardholder name, expiry) is decrypted when returning the profile; only the last four digits of the card are exposed in `paymentMethod.lastFour`. The default card (if any) is returned first; `paymentMethod.isDefault` indicates whether this card is the user’s default.
 
 ---
 
@@ -354,11 +352,13 @@ When card was sent and valid, `data` also includes `"valid": true` and `"cardTyp
   "cardNumber": "4111222233334444",
   "cardholderName": "JANE DOE",
   "expiryDate": "12/28",
-  "cvv": "123"
+  "cvv": "123",
+  "isDefault": true
 }
 ```
 - **verificationToken** – From the **verify-email** API (email + code, no login token) after you received the OTP from **Initiate Card 2FA**.
 - **cardNumber** – 13–19 digits. **cardholderName**, **expiryDate** (MM/YY), **cvv** (3 or 4 digits) required.
+- **isDefault** – Optional boolean. If `true`, this card is set as the user’s default; any other card for the user becomes non-default. Only one card per user can be default. If this is the user’s only card, it is always stored as default regardless of `isDefault`.
 
 **Success (201):**
 ```json
@@ -367,7 +367,8 @@ When card was sent and valid, `data` also includes `"valid": true` and `"cardTyp
   "message": "Payment method added and verified successfully.",
   "data": {
     "lastFour": "4444",
-    "cardType": "Visa"
+    "cardType": "Visa",
+    "isDefault": true
   }
 }
 ```

@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS user_card_information (
   last_four CHAR(4) NULL,
   cardholder_name VARCHAR(100) NULL,
   expiry_date VARCHAR(7) NULL,
+  is_default TINYINT(1) DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES user_profile(user_id) ON DELETE CASCADE
