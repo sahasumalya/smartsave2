@@ -13,9 +13,9 @@ dotenv.config({
 });
 
 // 3. Local overrides (optional, not committed – for secrets per machine)
-dotenv.config({
+/*dotenv.config({
   path: path.resolve(process.cwd(), '.env.local'),
   override: true,
-});
+});*/
 
 module.exports = { NODE_ENV };

@@ -138,10 +138,10 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"fullName\": \"Jane Doe\",\n  \"phoneNumber\": \"+1234567890\",\n  \"email\": \"jane.doe@example.com\",\n  \"emailVerificationToken\": \"{{verificationToken}}\",\n  \"password\": \"SecurePassword123!\",\n  \"cardNumber\": \"4111111111111111\",\n  \"cardholderName\": \"JANE DOE\",\n  \"expiryDate\": \"12/28\",\n  \"cvv\": \"123\"\n}"
+              "raw": "{\n  \"fullName\": \"Jane Doe\",\n  \"phoneNumber\": \"+1234567890\",\n  \"email\": \"jane.doe@example.com\",\n  \"emailVerificationToken\": \"{{verificationToken}}\",\n  \"password\": \"SecurePassword123!\"\n}"
             },
             "url": "{{baseUrl}}/api/v1/users/signup",
-            "description": "Register user. Use verificationToken from Verify Email Code. Card fields optional. Saves token to collection variable."
+            "description": "Register user. Use verificationToken from Verify Email Code. Add cards later via Verify Card Initiate + Add Card. Saves token to collection variable."
           }
         },
         {
@@ -220,7 +220,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"verificationToken\": \"{{verificationToken}}\",\n  \"cardNumber\": \"4111222233334444\",\n  \"cardholderName\": \"JANE DOE\",\n  \"expiryDate\": \"12/28\",\n  \"cvv\": \"123\"\n}"
+              "raw": "{\n  \"verificationToken\": \"{{verificationToken}}\",\n  \"cardNumber\": \"4111222233334444\",\n  \"cardholderName\": \"JANE DOE\",\n  \"expiryDate\": \"12/28\",\n  \"cvv\": \"123\",\n  \"isDefault\": true\n}"
             },
             "url": "{{baseUrl}}/api/v1/users/card",
             "description": "Add payment method after 2FA. Get verificationToken from Verify Email Code (email + code from Verify Card Initiate OTP)."

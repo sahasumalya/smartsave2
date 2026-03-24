@@ -1,16 +1,19 @@
 require('./config/loadEnv');
 const express = require('express');
+const { error: logError, info } = require('./utils/logger');
+const { requestLogger } = require('./middleware/requestLogger');
 
-// Keep process alive on uncaught errors; log and continue
+// Keep process alive on uncaught errors; log and continue (no sensitive data in stack)
 process.on('uncaughtException', (err) => {
-  console.error('[uncaughtException]', err.stack || err.message);
+  logError('uncaughtException', err.stack || err.message);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('[unhandledRejection]', reason);
+process.on('unhandledRejection', (reason) => {
+  logError('unhandledRejection', String(reason));
 });
 
 const { errorHandler } = require('./middleware/errorHandler');
+const { corsMiddleware } = require('./middleware/corsConfig');
 const authRoutes = require('./routes/auth');
 const usersRoutes = require('./routes/users');
 const paymentsRoutes = require('./routes/payments');
@@ -19,7 +22,9 @@ const investmentsRoutes = require('./routes/investments');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(corsMiddleware);
 app.use(express.json());
+app.use(requestLogger);
 
 app.get('/', (req, res) => {
   res.json({ message: 'Hello from Express' });
@@ -43,5 +48,5 @@ app.use((req, res) => {
 app.use(errorHandler);
 
 app.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
+  info(`Server running at http://localhost:${PORT}`);
 });

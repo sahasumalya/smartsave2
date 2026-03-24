@@ -5,6 +5,7 @@ const { requireAuth } = require('../middleware/auth');
 const { validateCard, getCardType } = require('../utils/cardUtils');
 const { sendVerificationEmail } = require('../services/email');
 const { asyncHandler } = require('../middleware/asyncHandler');
+const { debug, error: logError } = require('../utils/logger');
 
 const router = express.Router();
 
@@ -109,8 +110,9 @@ router.post(
 
     try {
       await sendVerificationEmail(email, otp, 'card_verification');
+      debug('verify-card-initiate OTP sent', { email });
     } catch (err) {
-      console.error('[verify-card-initiate] Failed to send email:', err.message);
+      logError('verify-card-initiate email failed', err.message);
       return res.status(500).json({
         status: 'error',
         message: 'Failed to send verification email. Please try again later.',
