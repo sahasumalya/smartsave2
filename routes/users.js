@@ -78,7 +78,7 @@ router.post('/signup', signupValidators, asyncHandler(async (req, res) => {
     return res.status(201).json({
       status: 'success',
       message: 'User created successfully',
-      data: { userId: String(userId), token },
+      data: { token },
     });
   } finally {
     client.release();
@@ -396,6 +396,93 @@ router.post(
   })
 );
 
+const editProfileValidators = [
+  body('fullName')
+    .optional()
+    .isString().trim().notEmpty().withMessage('Full name cannot be empty')
+    .isLength({ max: 100 }).withMessage('Full name must be at most 100 characters'),
+  body('phoneNumber')
+    .optional()
+    .isString().trim().notEmpty().withMessage('Phone number cannot be empty'),
+  body('dateOfBirth')
+    .optional()
+    .isISO8601({ strict: true }).withMessage('Date of birth must be a valid date (YYYY-MM-DD)')
+    .custom((value) => {
+      const dob = new Date(value);
+      if (dob >= new Date()) throw new Error('Date of birth must be in the past');
+      return true;
+    }),
+];
+
+/**
+ * POST /api/v1/users/profile/edit
+ * Auth required. Update name, phone number, and/or date of birth.
+ * At least one field must be provided.
+ */
+router.post(
+  '/profile/edit',
+  requireAuth(),
+  editProfileValidators,
+  asyncHandler(async (req, res) => {
+    const errs = validationResult(req);
+    if (!errs.isEmpty()) {
+      return res.status(400).json({
+        status: 'error',
+        message: errs.array()[0]?.msg || 'Validation failed',
+        errors: errs.array().map((e) => ({ field: e.path, message: e.msg })),
+      });
+    }
+
+    const { fullName, phoneNumber, dateOfBirth } = req.body;
+
+    if (fullName === undefined && phoneNumber === undefined && dateOfBirth === undefined) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'At least one field (fullName, phoneNumber, dateOfBirth) is required.',
+      });
+    }
+
+    const userId = req.user.userId;
+
+    const userRow = await pool.query(
+      'SELECT user_id FROM user_profile WHERE user_id = ?',
+      [userId]
+    );
+    if (userRow.rows.length === 0) {
+      return res.status(404).json({ status: 'error', message: 'User profile not found.' });
+    }
+
+    const setClauses = [];
+    const params = [];
+
+    if (fullName !== undefined) {
+      setClauses.push('full_name = ?');
+      params.push(fullName.trim());
+    }
+    if (phoneNumber !== undefined) {
+      setClauses.push('phone_number = ?');
+      params.push(encrypt(phoneNumber.trim()));
+    }
+    if (dateOfBirth !== undefined) {
+      setClauses.push('date_of_birth = ?');
+      params.push(encrypt(dateOfBirth));
+    }
+
+    setClauses.push('updated_at = NOW()');
+    params.push(userId);
+
+    await pool.query(
+      `UPDATE user_profile SET ${setClauses.join(', ')} WHERE user_id = ?`,
+      params
+    );
+
+    return res.status(200).json({
+      status: 'success',
+      message: 'Profile updated successfully',
+    });
+  })
+);
+
 /**
  * GET /api/v1/users/profile
  * Requires auth. Returns user, investments, masked card.
@@ -405,7 +492,7 @@ router.get('/profile', requireAuth(), asyncHandler(async (req, res) => {
 
   try {
     const userRow = await pool.query(
-      'SELECT user_id, full_name, email, phone_number FROM user_profile WHERE user_id = ?',
+      'SELECT user_id, full_name, email, phone_number, date_of_birth FROM user_profile WHERE user_id = ?',
       [userId]
     );
     if (userRow.rows.length === 0) {
@@ -421,6 +508,14 @@ router.get('/profile', requireAuth(), asyncHandler(async (req, res) => {
         phoneNumber = decrypt(u.phone_number);
       } catch (err) {
         logError('profile decrypt phone_number failed', err.message);
+      }
+    }
+    let dateOfBirth = null;
+    if (u.date_of_birth) {
+      try {
+        dateOfBirth = decrypt(u.date_of_birth);
+      } catch (err) {
+        logError('profile decrypt date_of_birth failed', err.message);
       }
     }
 
@@ -471,10 +566,10 @@ router.get('/profile', requireAuth(), asyncHandler(async (req, res) => {
       status: 'success',
       data: {
         user: {
-          userId: String(u.user_id),
           fullName: u.full_name,
           email: u.email,
           phoneNumber,
+          dateOfBirth,
         },
         investments: invRows.rows.map((r) => ({
           assetId: r.asset_id,

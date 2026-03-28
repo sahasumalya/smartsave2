@@ -264,6 +264,38 @@ No body.
 
 ---
 
+### Edit profile
+
+**POST** `/api/v1/users/profile/edit`  
+**Auth:** Required – `Authorization: Bearer <accessToken>`
+
+**Body:** All fields are optional, but **at least one** must be provided.
+```json
+{
+  "fullName": "Jane Doe",
+  "phoneNumber": "+1234567890",
+  "dateOfBirth": "1995-06-15"
+}
+```
+- **fullName** – String, max 100 characters.
+- **phoneNumber** – String. Stored **AES-256 encrypted**.
+- **dateOfBirth** – ISO 8601 date (`YYYY-MM-DD`). Must be in the past. Stored **AES-256 encrypted**.
+
+**Success (200):**
+```json
+{
+  "status": "success",
+  "message": "Profile updated successfully"
+}
+```
+
+**Errors:**
+- **400** – Validation failed or no fields provided.
+- **401** – Missing or invalid JWT.
+- **404** – User profile not found.
+
+---
+
 ### Get user profile
 
 **GET** `/api/v1/users/profile`  
@@ -280,7 +312,8 @@ No body.
       "userId": "...",
       "fullName": "Jane Doe",
       "email": "jane.doe@example.com",
-      "phoneNumber": "+1234567890"
+      "phoneNumber": "+1234567890",
+      "dateOfBirth": "1995-06-15"
     },
     "investments": [
       { "assetId": "EQUITY_FUND_01", "name": "Global Equity Fund", "percentage": 60 }
@@ -425,6 +458,7 @@ No auth.
 | Login                | POST   | `/api/v1/users/login`                  | No     |
 | Verify OTP (login)    | POST   | `/api/v1/auth/verification/verify`     | No     |
 | Change password      | PATCH  | `/api/v1/users/change-password`        | Bearer |
+| Edit profile         | POST   | `/api/v1/users/profile/edit`           | Bearer |
 | Logout               | POST   | `/api/v1/users/logout`                 | Optional |
 | Get profile          | GET    | `/api/v1/users/profile`                | Bearer |
 | Initiate Card 2FA (+ optional validate card) | POST | `/api/v1/payments/verify-card-initiate` | Bearer |

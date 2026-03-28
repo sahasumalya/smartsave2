@@ -1,11 +1,12 @@
 -- SmartSave DB Schema (MySQL)
 
--- 1. user_profile (phone_number stored AES-256 encrypted)
+-- 1. user_profile (phone_number, date_of_birth stored AES-256 encrypted)
 CREATE TABLE IF NOT EXISTS user_profile (
   user_id CHAR(36) PRIMARY KEY,
   full_name VARCHAR(100) NOT NULL,
   email VARCHAR(255) UNIQUE NOT NULL,
   phone_number TEXT,
+  date_of_birth TEXT NULL,
   password_hash TEXT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP

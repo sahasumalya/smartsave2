@@ -191,7 +191,23 @@
             "method": "GET",
             "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
             "url": "{{baseUrl}}/api/v1/users/profile",
-            "description": "Get current user profile, investments, and masked card. Requires auth."
+            "description": "Get current user profile (including dateOfBirth), investments, and masked card. Requires auth."
+          }
+        },
+        {
+          "name": "Edit Profile",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Jane Doe\",\n  \"phoneNumber\": \"+1234567890\",\n  \"dateOfBirth\": \"1995-06-15\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/users/profile/edit",
+            "description": "Update profile fields. All fields optional but at least one required. fullName (max 100 chars), phoneNumber (stored encrypted), dateOfBirth (YYYY-MM-DD, must be in the past, stored encrypted). Requires auth."
           }
         },
         {

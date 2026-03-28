@@ -62,7 +62,6 @@ describe('POST /api/v1/users/signup', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.status).toBe('success');
-    expect(res.body.data.userId).toBeDefined();
     expect(res.body.data.token).toBeDefined();
     expect(mockClient.release).toHaveBeenCalled();
   });
@@ -245,7 +244,7 @@ describe('GET /api/v1/users/profile', () => {
   test('returns 200 with full profile (user + investments + card)', async () => {
     pool.query
       .mockResolvedValueOnce({
-        rows: [{ user_id: 'user-uuid-123', full_name: 'Jane Doe', email: 'jane@example.com', phone_number: 'enc:+1234567890' }],
+        rows: [{ user_id: 'user-uuid-123', full_name: 'Jane Doe', email: 'jane@example.com', phone_number: 'enc:+1234567890', date_of_birth: 'enc:1995-06-15' }],
       })
       .mockResolvedValueOnce({
         rows: [{ asset_id: 'EQUITY_FUND_01', name: 'Global Equity Fund', percentage: '60.00' }],
@@ -271,6 +270,7 @@ describe('GET /api/v1/users/profile', () => {
     expect(res.body.status).toBe('success');
     expect(res.body.data.user.fullName).toBe('Jane Doe');
     expect(res.body.data.user.phoneNumber).toBe('+1234567890');
+    expect(res.body.data.user.dateOfBirth).toBe('1995-06-15');
     expect(res.body.data.investments).toHaveLength(1);
     expect(res.body.data.investments[0].assetId).toBe('EQUITY_FUND_01');
     expect(res.body.data.paymentMethod.cardType).toBe('Visa');
@@ -281,7 +281,7 @@ describe('GET /api/v1/users/profile', () => {
   test('returns 200 with empty investments and null paymentMethod', async () => {
     pool.query
       .mockResolvedValueOnce({
-        rows: [{ user_id: 'user-uuid-123', full_name: 'Jane Doe', email: 'jane@example.com', phone_number: null }],
+        rows: [{ user_id: 'user-uuid-123', full_name: 'Jane Doe', email: 'jane@example.com', phone_number: null, date_of_birth: null }],
       })
       .mockResolvedValueOnce({ rows: [] })  // no investments
       .mockResolvedValueOnce({ rows: [] }); // no card
@@ -291,6 +291,7 @@ describe('GET /api/v1/users/profile', () => {
       .set('Authorization', authHeader());
 
     expect(res.status).toBe(200);
+    expect(res.body.data.user.dateOfBirth).toBeNull();
     expect(res.body.data.investments).toEqual([]);
     expect(res.body.data.paymentMethod).toBeNull();
   });
