@@ -1,14 +1,30 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
+const path = require('path');
+const multer = require('multer');
 const { body, validationResult } = require('express-validator');
 const { pool } = require('../db/pool');
 const { signToken, requireAuth } = require('../middleware/auth');
 const { getCardType, validateCard } = require('../utils/cardUtils');
 const { encrypt, decrypt } = require('../utils/encryption');
 const { sendVerificationEmail } = require('../services/email');
+const { uploadToS3, getSignedImageUrl } = require('../services/s3');
 const { asyncHandler } = require('../middleware/asyncHandler');
 const { debug, error: logError } = require('../utils/logger');
+const { nowUTC } = require('../utils/time');
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/jpg'];
+    if (!allowed.includes(file.mimetype)) {
+      return cb(new Error('Only JPG/JPEG images are allowed.'));
+    }
+    cb(null, true);
+  },
+});
 
 const router = express.Router();
 
@@ -120,8 +136,8 @@ router.post('/login', loginValidators, asyncHandler(async (req, res) => {
 
   await pool.query(
     `INSERT INTO email_validation (email, otp_code, is_used, reason, verification_token, updated_at)
-     VALUES (?, ?, 0, ?, ?, NOW())`,
-    [email, otp, REASON_SIGN_IN, verificationToken]
+     VALUES (?, ?, 0, ?, ?, ?)`,
+    [email, otp, REASON_SIGN_IN, verificationToken, nowUTC()]
   );
 
   try {
@@ -200,8 +216,9 @@ router.patch(
     }
 
     const newHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
-    await pool.query('UPDATE user_profile SET password_hash = ?, updated_at = NOW() WHERE user_id = ?', [
+    await pool.query('UPDATE user_profile SET password_hash = ?, updated_at = ? WHERE user_id = ?', [
       newHash,
+      nowUTC(),
       userId,
     ]);
 
@@ -295,7 +312,7 @@ router.post(
     }
     const createdAt = new Date(rec.created_at);
     const expiry = new Date(createdAt.getTime() + OTP_EXPIRY_MINUTES * 60 * 1000);
-    if (new Date() > expiry) {
+    if (new Date(nowUTC()) > expiry) {
       return res.status(400).json({
         status: 'error',
         message: 'The verification token is invalid or has expired.',
@@ -303,8 +320,8 @@ router.post(
     }
 
     const pendingRow = await pool.query(
-      'SELECT id FROM card_verification_initiated WHERE user_id = ? AND expires_at > NOW() AND is_used = 0 ORDER BY initiated_at DESC LIMIT 1',
-      [userId]
+      'SELECT id FROM card_verification_initiated WHERE user_id = ? AND expires_at > ? AND is_used = 0 ORDER BY initiated_at DESC LIMIT 1',
+      [userId, nowUTC()]
     );
     if (pendingRow.rows.length === 0) {
       return res.status(404).json({
@@ -377,8 +394,8 @@ router.post(
         [cardId, userId, cardNumberEncrypted, cvvEncrypted, cardType, cardholderNameEncrypted, expiryDateEncrypted, setAsDefault ? 1 : 0]
       );
       await client.query(
-        'UPDATE email_validation SET is_used = 1, updated_at = NOW() WHERE id = ?',
-        [rec.id]
+        'UPDATE email_validation SET is_used = 1, updated_at = ? WHERE id = ?',
+        [nowUTC(), rec.id]
       );
       await client.query(
         'UPDATE card_verification_initiated SET is_used = 1 WHERE id = ?',
@@ -409,9 +426,13 @@ const editProfileValidators = [
     .isISO8601({ strict: true }).withMessage('Date of birth must be a valid date (YYYY-MM-DD)')
     .custom((value) => {
       const dob = new Date(value);
-      if (dob >= new Date()) throw new Error('Date of birth must be in the past');
+      if (dob >= new Date(nowUTC())) throw new Error('Date of birth must be in the past');
       return true;
     }),
+  body('designation')
+    .optional()
+    .isString().trim().notEmpty().withMessage('Designation cannot be empty')
+    .isLength({ max: 150 }).withMessage('Designation must be at most 150 characters'),
 ];
 
 /**
@@ -433,12 +454,12 @@ router.post(
       });
     }
 
-    const { fullName, phoneNumber, dateOfBirth } = req.body;
+    const { fullName, phoneNumber, dateOfBirth, designation } = req.body;
 
-    if (fullName === undefined && phoneNumber === undefined && dateOfBirth === undefined) {
+    if (fullName === undefined && phoneNumber === undefined && dateOfBirth === undefined && designation === undefined) {
       return res.status(400).json({
         status: 'error',
-        message: 'At least one field (fullName, phoneNumber, dateOfBirth) is required.',
+        message: 'At least one field (fullName, phoneNumber, dateOfBirth, designation) is required.',
       });
     }
 
@@ -467,8 +488,13 @@ router.post(
       setClauses.push('date_of_birth = ?');
       params.push(encrypt(dateOfBirth));
     }
+    if (designation !== undefined) {
+      setClauses.push('designation = ?');
+      params.push(designation.trim());
+    }
 
-    setClauses.push('updated_at = NOW()');
+    setClauses.push('updated_at = ?');
+    params.push(nowUTC());
     params.push(userId);
 
     await pool.query(
@@ -484,6 +510,60 @@ router.post(
 );
 
 /**
+ * POST /api/v1/users/profile/image
+ * Auth required. Upload a JPG/JPEG profile image to S3.
+ * Accepts multipart/form-data with field name "image".
+ */
+router.post(
+  '/profile/image',
+  requireAuth(),
+  (req, res, next) => {
+    upload.single('image')(req, res, (err) => {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ status: 'error', message: 'File size must not exceed 5 MB.' });
+        }
+        return res.status(400).json({ status: 'error', message: err.message });
+      }
+      if (err) {
+        return res.status(400).json({ status: 'error', message: err.message });
+      }
+      next();
+    });
+  },
+  asyncHandler(async (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ status: 'error', message: 'Image file is required (field name: "image").' });
+    }
+
+    const userId = req.user.userId;
+
+    const userRow = await pool.query('SELECT user_id FROM user_profile WHERE user_id = ?', [userId]);
+    if (userRow.rows.length === 0) {
+      return res.status(404).json({ status: 'error', message: 'User profile not found.' });
+    }
+
+    const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
+    const key = `profile-images/${crypto.randomUUID()}${ext}`;
+
+    await uploadToS3(req.file.buffer, key, req.file.mimetype);
+
+    await pool.query(
+      'UPDATE user_profile SET profile_image_url = ?, updated_at = ? WHERE user_id = ?',
+      [key, nowUTC(), userId]
+    );
+
+    const signedUrl = await getSignedImageUrl(key);
+
+    return res.status(200).json({
+      status: 'success',
+      message: 'Profile image uploaded successfully.',
+      data: { profileImageUrl: signedUrl },
+    });
+  })
+);
+
+/**
  * GET /api/v1/users/profile
  * Requires auth. Returns user, investments, masked card.
  */
@@ -492,7 +572,7 @@ router.get('/profile', requireAuth(), asyncHandler(async (req, res) => {
 
   try {
     const userRow = await pool.query(
-      'SELECT user_id, full_name, email, phone_number, date_of_birth FROM user_profile WHERE user_id = ?',
+      'SELECT user_id, full_name, email, phone_number, date_of_birth, designation, profile_image_url FROM user_profile WHERE user_id = ?',
       [userId]
     );
     if (userRow.rows.length === 0) {
@@ -562,6 +642,15 @@ router.get('/profile', requireAuth(), asyncHandler(async (req, res) => {
       };
     }
 
+    let profileImageUrl = null;
+    if (u.profile_image_url) {
+      try {
+        profileImageUrl = await getSignedImageUrl(u.profile_image_url);
+      } catch (err) {
+        logError('profile signed URL generation failed', err.message);
+      }
+    }
+
     return res.status(200).json({
       status: 'success',
       data: {
@@ -570,6 +659,8 @@ router.get('/profile', requireAuth(), asyncHandler(async (req, res) => {
           email: u.email,
           phoneNumber,
           dateOfBirth,
+          designation: u.designation ?? null,
+          profileImageUrl,
         },
         investments: invRows.rows.map((r) => ({
           assetId: r.asset_id,

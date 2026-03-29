@@ -6,6 +6,7 @@ const { validateCard, getCardType } = require('../utils/cardUtils');
 const { sendVerificationEmail } = require('../services/email');
 const { asyncHandler } = require('../middleware/asyncHandler');
 const { debug, error: logError } = require('../utils/logger');
+const { nowUTC, daysAgo } = require('../utils/time');
 
 const router = express.Router();
 
@@ -85,8 +86,8 @@ router.post(
     }
 
     const dailyCount = await pool.query(
-      'SELECT COUNT(*) AS cnt FROM card_verification_initiated WHERE user_id = ? AND initiated_at > DATE_SUB(NOW(), INTERVAL 1 DAY)',
-      [userId]
+      'SELECT COUNT(*) AS cnt FROM card_verification_initiated WHERE user_id = ? AND initiated_at > ?',
+      [userId, daysAgo(1)]
     );
     const count = Number(dailyCount.rows[0]?.cnt ?? 0);
     if (count >= CARD_VERIFICATION_DAILY_LIMIT) {
@@ -104,8 +105,8 @@ router.post(
 
     const otp = generateOtp(4);
     await pool.query(
-      `INSERT INTO email_validation (email, otp_code, is_used, reason, updated_at) VALUES (?, ?, 0, ?, NOW())`,
-      [email, otp, REASON_CARD_VERIFICATION]
+      `INSERT INTO email_validation (email, otp_code, is_used, reason, updated_at) VALUES (?, ?, 0, ?, ?)`,
+      [email, otp, REASON_CARD_VERIFICATION, nowUTC()]
     );
 
     try {

@@ -296,6 +296,38 @@ No body.
 
 ---
 
+### Upload profile image
+
+**POST** `/api/v1/users/profile/image`  
+**Auth:** Required – `Authorization: Bearer <accessToken>`  
+**Content-Type:** `multipart/form-data`
+
+| Form field | Type | Description |
+|------------|------|-------------|
+| `image`    | File | JPG/JPEG image, max 5 MB |
+
+Upload a profile picture. The image is stored in S3 and the URL is saved to the user's profile. Re-uploading replaces the previous image URL.
+
+**Success (200):**
+```json
+{
+  "status": "success",
+  "message": "Profile image uploaded successfully.",
+  "data": {
+    "profileImageUrl": "https://bucket.s3.us-east-1.amazonaws.com/profile-images/uuid.jpg"
+  }
+}
+```
+
+**Errors:**
+- **400** – No file attached: `"Image file is required (field name: \"image\")."`
+- **400** – Wrong format: `"Only JPG/JPEG images are allowed."`
+- **400** – Too large: `"File size must not exceed 5 MB."`
+- **401** – Missing or invalid JWT.
+- **404** – User profile not found.
+
+---
+
 ### Get user profile
 
 **GET** `/api/v1/users/profile`  
@@ -313,7 +345,8 @@ No body.
       "fullName": "Jane Doe",
       "email": "jane.doe@example.com",
       "phoneNumber": "+1234567890",
-      "dateOfBirth": "1995-06-15"
+      "dateOfBirth": "1995-06-15",
+      "profileImageUrl": "https://bucket.s3.us-east-1.amazonaws.com/profile-images/uuid.jpg"
     },
     "investments": [
       { "assetId": "EQUITY_FUND_01", "name": "Global Equity Fund", "percentage": 60 }
@@ -459,6 +492,7 @@ No auth.
 | Verify OTP (login)    | POST   | `/api/v1/auth/verification/verify`     | No     |
 | Change password      | PATCH  | `/api/v1/users/change-password`        | Bearer |
 | Edit profile         | POST   | `/api/v1/users/profile/edit`           | Bearer |
+| Upload profile image | POST   | `/api/v1/users/profile/image`          | Bearer |
 | Logout               | POST   | `/api/v1/users/logout`                 | Optional |
 | Get profile          | GET    | `/api/v1/users/profile`                | Bearer |
 | Initiate Card 2FA (+ optional validate card) | POST | `/api/v1/payments/verify-card-initiate` | Bearer |

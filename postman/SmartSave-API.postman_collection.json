@@ -211,6 +211,28 @@
           }
         },
         {
+          "name": "Upload Profile Image",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "image",
+                  "type": "file",
+                  "src": "",
+                  "description": "JPG/JPEG image file (max 5 MB)"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/users/profile/image",
+            "description": "Upload a profile picture (JPG/JPEG, max 5 MB). The image is stored in S3 and the URL is saved to the user profile. Returns the S3 URL. Requires auth."
+          }
+        },
+        {
           "name": "Change Password",
           "request": {
             "method": "PATCH",

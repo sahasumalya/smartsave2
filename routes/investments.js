@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { pool } = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/asyncHandler');
+const { nowUTC } = require('../utils/time');
 
 const router = express.Router();
 
@@ -61,8 +62,8 @@ router.post(
       for (const p of proportions) {
         await client.query(
           `INSERT INTO user_investments_proportion (user_id, asset_id, percentage, updated_at)
-           VALUES (?, ?, ?, NOW())`,
-          [userId, p.assetId, p.percentage]
+           VALUES (?, ?, ?, ?)`,
+          [userId, p.assetId, p.percentage, nowUTC()]
         );
       }
 

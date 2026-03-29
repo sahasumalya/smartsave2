@@ -7,6 +7,7 @@ const { sendVerificationEmail, sendPasswordResetEmail } = require('../services/e
 const { signToken } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/asyncHandler');
 const { debug, error: logError } = require('../utils/logger');
+const { nowUTC, hoursFromNow, hoursAgo } = require('../utils/time');
 
 const SALT_ROUNDS = 10;
 
@@ -83,30 +84,34 @@ router.post(
             retryAfterSeconds: RETRY_AFTER_SECONDS,
           });
         }
+        const now = nowUTC();
+        const resetAt = hoursFromNow(24);
         if (lastAt < windowStart) {
           await client.query(
-            'UPDATE email_validation_limit SET request_count = 1, last_request_at = NOW(), updated_at = NOW(), reset_at = DATE_ADD(NOW(), INTERVAL 24 HOUR) WHERE email = ?',
-            [email]
+            'UPDATE email_validation_limit SET request_count = 1, last_request_at = ?, updated_at = ?, reset_at = ? WHERE email = ?',
+            [now, now, resetAt, email]
           );
         } else {
           await client.query(
-            'UPDATE email_validation_limit SET request_count = request_count + 1, last_request_at = NOW(), updated_at = NOW() WHERE email = ?',
-            [email]
+            'UPDATE email_validation_limit SET request_count = request_count + 1, last_request_at = ?, updated_at = ? WHERE email = ?',
+            [now, now, email]
           );
         }
       } else {
+        const now = nowUTC();
+        const resetAt = hoursFromNow(24);
         await client.query(
           `INSERT INTO email_validation_limit (email, request_count, last_request_at, reset_at, updated_at)
-           VALUES (?, 1, NOW(), DATE_ADD(NOW(), INTERVAL 24 HOUR), NOW())
-           ON DUPLICATE KEY UPDATE request_count = 1, last_request_at = NOW(), reset_at = DATE_ADD(NOW(), INTERVAL 24 HOUR), updated_at = NOW()`,
-          [email]
+           VALUES (?, 1, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE request_count = 1, last_request_at = ?, reset_at = ?, updated_at = ?`,
+          [email, now, resetAt, now, now, resetAt, now]
         );
       }
 
       const otp = generateOtp(4);
       await client.query(
-        'INSERT INTO email_validation (email, otp_code, is_used, reason, updated_at) VALUES (?, ?, 0, ?, NOW())',
-        [email, otp, reason]
+        'INSERT INTO email_validation (email, otp_code, is_used, reason, updated_at) VALUES (?, ?, 0, ?, ?)',
+        [email, otp, reason, nowUTC()]
       );
 
       try {
@@ -177,7 +182,7 @@ router.post(
       }
       const createdAt = new Date(rec.created_at);
       const expiry = new Date(createdAt.getTime() + OTP_EXPIRY_MINUTES * 60 * 1000);
-      if (new Date() > expiry) {
+      if (new Date(nowUTC()) > expiry) {
         return res.status(410).json({
           status: 'error',
           message: 'Verification session expired.',
@@ -197,8 +202,8 @@ router.post(
         }
         const userId = userRow.rows[0].user_id;
         await client.query(
-          'UPDATE email_validation SET is_used = 1, updated_at = NOW() WHERE id = ?',
-          [rec.id]
+          'UPDATE email_validation SET is_used = 1, updated_at = ? WHERE id = ?',
+          [nowUTC(), rec.id]
         );
         const accessToken = signToken({ userId }, '1h');
         return res.status(200).json({
@@ -210,15 +215,16 @@ router.post(
 
       const verificationToken = 'v_tok_' + crypto.randomBytes(12).toString('hex');
       const isCardVerification = rec.reason === 'CARD_VERIFICATION';
+      const now = nowUTC();
       if (isCardVerification) {
         await client.query(
-          'UPDATE email_validation SET verification_token = ?, updated_at = NOW() WHERE id = ?',
-          [verificationToken, rec.id]
+          'UPDATE email_validation SET verification_token = ?, updated_at = ? WHERE id = ?',
+          [verificationToken, now, rec.id]
         );
       } else {
         await client.query(
-          'UPDATE email_validation SET is_used = 1, verification_token = ?, updated_at = NOW() WHERE id = ?',
-          [verificationToken, rec.id]
+          'UPDATE email_validation SET is_used = 1, verification_token = ?, updated_at = ? WHERE id = ?',
+          [verificationToken, now, rec.id]
         );
       }
       return res.status(200).json({
@@ -255,8 +261,8 @@ router.post(
     const client = await pool.connect();
     try {
       const recentReset = await client.query(
-        'SELECT 1 FROM password_reset_tokens WHERE email = ? AND created_at > DATE_SUB(NOW(), INTERVAL ? HOUR) LIMIT 1',
-        [email, PASSWORD_RESET_RATE_LIMIT_HOURS]
+        'SELECT 1 FROM password_reset_tokens WHERE email = ? AND created_at > ? LIMIT 1',
+        [email, hoursAgo(PASSWORD_RESET_RATE_LIMIT_HOURS)]
       );
       if (recentReset.rows.length > 0) {
         return res.status(429).json({
@@ -355,7 +361,7 @@ router.post(
         message: 'This reset link has already been used.',
       });
     }
-    if (expiresAt < new Date()) {
+    if (expiresAt < new Date(nowUTC())) {
       return res.status(400).json({
         status: 'error',
         message: 'The reset link is invalid or has expired.',
@@ -365,11 +371,13 @@ router.post(
     const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
     const client = await pool.connect();
     try {
-      await client.query('UPDATE user_profile SET password_hash = ?, updated_at = NOW() WHERE email = ?', [
+      const now = nowUTC();
+      await client.query('UPDATE user_profile SET password_hash = ?, updated_at = ? WHERE email = ?', [
         passwordHash,
+        now,
         rec.email,
       ]);
-      await client.query('UPDATE password_reset_tokens SET is_used = 1, updated_at = NOW() WHERE id = ?', [rec.id]);
+      await client.query('UPDATE password_reset_tokens SET is_used = 1, updated_at = ? WHERE id = ?', [now, rec.id]);
     } finally {
       client.release();
     }

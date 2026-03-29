@@ -1,5 +1,14 @@
 -- SmartSave DB Schema (MySQL)
 
+DROP TABLE IF EXISTS user_investments_proportion;
+DROP TABLE IF EXISTS assets;
+DROP TABLE IF EXISTS card_verification_initiated;
+DROP TABLE IF EXISTS password_reset_tokens;
+DROP TABLE IF EXISTS email_validation_limit;
+DROP TABLE IF EXISTS email_validation;
+DROP TABLE IF EXISTS user_card_information;
+DROP TABLE IF EXISTS user_profile;
+
 -- 1. user_profile (phone_number, date_of_birth stored AES-256 encrypted)
 CREATE TABLE IF NOT EXISTS user_profile (
   user_id CHAR(36) PRIMARY KEY,
@@ -7,6 +16,8 @@ CREATE TABLE IF NOT EXISTS user_profile (
   email VARCHAR(255) UNIQUE NOT NULL,
   phone_number TEXT,
   date_of_birth TEXT NULL,
+  designation VARCHAR(150) NULL,
+  profile_image_url TEXT NULL,
   password_hash TEXT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
