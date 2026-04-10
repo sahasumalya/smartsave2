@@ -205,7 +205,7 @@ router.post(
           'UPDATE email_validation SET is_used = 1, updated_at = ? WHERE id = ?',
           [nowUTC(), rec.id]
         );
-        const accessToken = signToken({ userId }, '1h');
+        const accessToken = signToken({ userId }, '12h');
         return res.status(200).json({
           status: 'success',
           message: 'Email verified successfully',
