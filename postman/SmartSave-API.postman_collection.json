@@ -7,7 +7,8 @@
   "variable": [
     { "key": "baseUrl", "value": "http://localhost:3000" },
     { "key": "token", "value": "" },
-    { "key": "verificationToken", "value": "" }
+    { "key": "verificationToken", "value": "" },
+    { "key": "plaidTokenId", "value": "" }
   ],
   "item": [
     {
@@ -304,6 +305,55 @@
             },
             "url": "{{baseUrl}}/api/v1/investments/proportion",
             "description": "Set allocation. Sum of percentages must equal 100. Asset IDs must exist (EQUITY_FUND_01, GOVT_BOND_02, CRYPTO_INDEX). Requires auth."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Plaid",
+      "item": [
+        {
+          "name": "Create Link Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const json = pm.response.json();",
+                  "  if (json.token_id) {",
+                  "    pm.collectionVariables.set('plaidTokenId', json.token_id);",
+                  "  }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/plaid/link-token",
+            "description": "Creates a temporary Plaid link token for the authenticated user. No body required — userId is extracted from the JWT. The link token is stored (encrypted) in bank_tokens. Returns token_id (UUID, saved to collection variable) to use in Exchange Public Token."
+          }
+        },
+        {
+          "name": "Exchange Public Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"public_token\": \"public-sandbox-bbb6c66a-5609-4558-b7cd-a20ce4d5d9a0\",\n  \"token_id\": \"{{plaidTokenId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/plaid/exchange-token",
+            "description": "Exchanges the public_token from Plaid Link for a permanent access token. Requires token_id (UUID) from Create Link Token. Encrypts both access_token and item_id (AES-256-GCM) and updates the same bank_tokens row. Rejects if the token has already been exchanged (409)."
           }
         }
       ]

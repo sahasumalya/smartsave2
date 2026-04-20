@@ -64,7 +64,7 @@ const rawPool = mysql.createPool(config);
 const pool = {
   async query(sql, params = []) {
     const [rows] = await rawPool.execute(sql, params);
-    return { rows: Array.isArray(rows) ? rows : [] };
+    return { rows: Array.isArray(rows) ? rows : rows };
   },
 
   async getConnection() {
@@ -72,7 +72,7 @@ const pool = {
     return {
       async query(sql, params = []) {
         const [rows] = await conn.execute(sql, params);
-        return { rows: Array.isArray(rows) ? rows : [] };
+        return { rows: Array.isArray(rows) ? rows : rows };
       },
       release() {
         conn.release();

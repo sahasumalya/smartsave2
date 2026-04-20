@@ -1,5 +1,6 @@
 -- SmartSave DB Schema (MySQL)
 
+DROP TABLE IF EXISTS bank_tokens;
 DROP TABLE IF EXISTS user_investments_proportion;
 DROP TABLE IF EXISTS assets;
 DROP TABLE IF EXISTS card_verification_initiated;
@@ -107,6 +108,24 @@ CREATE TABLE IF NOT EXISTS user_investments_proportion (
   UNIQUE KEY unique_user_asset (user_id, asset_id),
   FOREIGN KEY (user_id) REFERENCES user_profile(user_id) ON DELETE CASCADE,
   FOREIGN KEY (asset_id) REFERENCES assets(asset_id)
+);
+
+-- 9. bank_tokens (Plaid link tokens and access tokens, stored AES-256 encrypted)
+CREATE TABLE IF NOT EXISTS bank_tokens (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  token_id CHAR(36) NOT NULL,
+  user_id CHAR(36) NOT NULL,
+  item_id TEXT DEFAULT NULL,
+  link_token TEXT DEFAULT NULL,
+  link_token_expiry DATETIME DEFAULT NULL,
+  link_request_id VARCHAR(255) DEFAULT NULL,
+  access_token TEXT DEFAULT NULL,
+  exchange_request_id VARCHAR(255) DEFAULT NULL,
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  UNIQUE KEY uq_token_id (token_id),
+  INDEX idx_user_id (user_id),
+  FOREIGN KEY (user_id) REFERENCES user_profile(user_id) ON DELETE CASCADE
 );
 
 -- Seed example assets

@@ -18,6 +18,7 @@ const authRoutes = require('./routes/auth');
 const usersRoutes = require('./routes/users');
 const paymentsRoutes = require('./routes/payments');
 const investmentsRoutes = require('./routes/investments');
+const plaidRoutes = require('./routes/plaid');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -38,6 +39,7 @@ app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', usersRoutes);
 app.use('/api/v1/payments', paymentsRoutes);
 app.use('/api/v1/investments', investmentsRoutes);
+app.use('/api/v1/plaid', plaidRoutes);
 
 // 404 for unknown routes
 app.use((req, res) => {

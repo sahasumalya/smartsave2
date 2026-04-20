@@ -25,4 +25,4 @@ function daysAgo(days) {
   return toMySQLTimestamp(new Date(Date.now() - days * 86_400_000));
 }
 
-module.exports = { nowUTC, hoursFromNow, hoursAgo, daysAgo };
+module.exports = { toMySQLTimestamp, nowUTC, hoursFromNow, hoursAgo, daysAgo };

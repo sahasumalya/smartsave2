@@ -479,7 +479,133 @@ No auth.
 
 ---
 
-## 5. Quick reference
+## 5. Plaid – Bank account linking
+
+Link a user's bank account via Plaid in two steps: create a link token → exchange the public token.
+
+### Environment variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PLAID_CLIENT_ID` | Yes | – | Your Plaid client ID |
+| `PLAID_SECRET` | Yes | – | Your Plaid secret key |
+| `PLAID_BASE_URL` | No | `https://sandbox.plaid.com` | Plaid API base URL (change for production) |
+| `PLAID_CLIENT_NAME` | No | `SmartSave` | App name shown in Plaid Link |
+
+### Database prerequisite
+
+The `bank_tokens` table must exist:
+
+```sql
+CREATE TABLE bank_tokens (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  token_id CHAR(36) NOT NULL,
+  user_id CHAR(36) NOT NULL,
+  item_id TEXT DEFAULT NULL,
+  link_token TEXT DEFAULT NULL,
+  link_token_expiry DATETIME DEFAULT NULL,
+  link_request_id VARCHAR(255) DEFAULT NULL,
+  access_token TEXT DEFAULT NULL,
+  exchange_request_id VARCHAR(255) DEFAULT NULL,
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  UNIQUE KEY uq_token_id (token_id),
+  INDEX idx_user_id (user_id)
+);
+```
+
+- `link_token`, `access_token`, and `item_id` are stored **AES-256-GCM encrypted**.
+- `link_request_id` and `exchange_request_id` store the Plaid `request_id` from each API call (useful for Plaid support debugging).
+
+---
+
+### Step 1: Create a link token
+
+**POST** `/api/v1/plaid/link-token`  
+**Auth:** Required – `Authorization: Bearer <accessToken>`
+
+No body required. The `userId` is extracted from the JWT.
+
+**What happens server-side:**
+1. Calls Plaid's `/link/token/create` to get a temporary link token.
+2. Generates a UUID `token_id` for the record.
+3. Encrypts the `link_token` with **AES-256-GCM** and inserts a new row into `bank_tokens` with the encrypted link token and its expiry.
+4. Returns the `token_id` along with the raw link token.
+
+**Success (200):**
+```json
+{
+  "status": "success",
+  "token_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "link_token": "link-sandbox-af1a0311-da53-4636-b754-dd15cc058176",
+  "expiration": "2026-04-20T12:00:00Z",
+  "request_id": "Aim3b"
+}
+```
+- Use **`link_token`** to initialize Plaid Link on the client (web or mobile).
+- Save **`token_id`** — it must be sent in the Exchange Public Token request.
+- The token is temporary and expires at the time indicated by `expiration`.
+
+**Errors:**
+- **401** – Missing or invalid JWT: `"Authentication required. Please log in."`
+- **500** – Plaid not configured (missing env vars): `"Plaid integration is not configured."`
+- **4xx/5xx** – Plaid upstream error: `{ "status": "error", "message": "<plaid error_message>" }`
+
+---
+
+### Step 2: Exchange public token
+
+**POST** `/api/v1/plaid/exchange-token`  
+**Auth:** Required – `Authorization: Bearer <accessToken>`
+
+**Body:**
+```json
+{
+  "public_token": "public-sandbox-bbb6c66a-5609-4558-b7cd-a20ce4d5d9a0",
+  "token_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+}
+```
+- **public_token** – The token returned by Plaid Link after the user completes the bank selection flow.
+- **token_id** – The UUID returned by the Create Link Token endpoint.
+
+**What happens server-side:**
+1. Validates that `token_id` belongs to the authenticated user and has not already been exchanged.
+2. Calls Plaid's `/item/public_token/exchange` to get a permanent `access_token` and `item_id`.
+3. Encrypts both the `access_token` and `item_id` with **AES-256-GCM**.
+4. Updates the same `bank_tokens` row (from the link-token step) with the encrypted values and the Plaid `request_id`.
+
+**Success (200):**
+```json
+{
+  "status": "success",
+  "message": "Bank account linked successfully."
+}
+```
+
+**Errors:**
+- **400** – Missing/invalid fields: `"public_token is required."` or `"token_id is required"`
+- **404** – Row not found or doesn't belong to user: `"Bank token record not found."`
+- **409** – Token already exchanged: `"This token has already been exchanged."`
+- **401** – Missing or invalid JWT: `"Authentication required. Please log in."`
+- **500** – Plaid not configured: `"Plaid integration is not configured."`
+- **4xx/5xx** – Plaid upstream error: `{ "status": "error", "message": "<plaid error_message>" }`
+
+---
+
+### Typical client integration flow
+
+```
+1. Client calls POST /api/v1/plaid/link-token  →  receives link_token + token_id
+2. Client initializes Plaid Link SDK with link_token
+3. User selects their bank and authenticates in the Plaid UI
+4. Plaid Link returns a public_token to the client on success
+5. Client calls POST /api/v1/plaid/exchange-token { public_token, token_id }
+6. Server exchanges, encrypts, updates the same row  →  bank is linked
+```
+
+---
+
+## 6. Quick reference
 
 | Purpose              | Method | Endpoint                                  | Auth   |
 |----------------------|--------|-------------------------------------------|--------|
@@ -498,11 +624,13 @@ No auth.
 | Initiate Card 2FA (+ optional validate card) | POST | `/api/v1/payments/verify-card-initiate` | Bearer |
 | Add card (verified)  | POST   | `/api/v1/users/card`                   | Bearer |
 | Set investments      | POST   | `/api/v1/investments/proportion`       | Bearer |
+| Plaid: create link token | POST | `/api/v1/plaid/link-token`            | Bearer |
+| Plaid: exchange public token | POST | `/api/v1/plaid/exchange-token`     | Bearer |
 | Health               | GET    | `/health`                              | No     |
 
 ---
 
-## 6. Using the token
+## 7. Using the token
 
 After **signup** (step 3) or **login** (step 2 verify), send the token on every request that requires auth:
 
