@@ -1,24 +1,17 @@
 const express = require('express');
-const crypto = require('crypto');
 const { body, validationResult } = require('express-validator');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/asyncHandler');
-const { pool } = require('../db/pool');
-const { encrypt } = require('../utils/encryption');
 const { debug, error: logError } = require('../utils/logger');
-const { nowUTC, toMySQLTimestamp } = require('../utils/time');
+const plaidService = require('../services/plaid');
+const bankTokenService = require('../services/bankToken');
+const { syncUserTransactions } = require('../services/transactionSync');
 
 const router = express.Router();
-
-const PLAID_BASE_URL = process.env.PLAID_BASE_URL || 'https://sandbox.plaid.com';
-const PLAID_CLIENT_ID = process.env.PLAID_CLIENT_ID;
-const PLAID_SECRET = process.env.PLAID_SECRET;
-const PLAID_CLIENT_NAME = process.env.PLAID_CLIENT_NAME || 'SmartSave';
 
 /**
  * POST /api/v1/plaid/link-token
  * Creates a temporary Plaid link token for the authenticated user.
- * Requires Bearer JWT in Authorization header.
  */
 router.post(
   '/link-token',
@@ -26,52 +19,8 @@ router.post(
   asyncHandler(async (req, res) => {
     const { userId } = req.user;
 
-    if (!PLAID_CLIENT_ID || !PLAID_SECRET) {
-      logError('plaid/link-token', 'Missing PLAID_CLIENT_ID or PLAID_SECRET env vars');
-      return res.status(500).json({
-        status: 'error',
-        message: 'Plaid integration is not configured.',
-      });
-    }
-
-    const body = {
-      client_id: PLAID_CLIENT_ID,
-      secret: PLAID_SECRET,
-      client_name: PLAID_CLIENT_NAME,
-      country_codes: ['US'],
-      language: 'en',
-      user: {
-        client_user_id: String(userId),
-      },
-      products: ['transactions'],
-      additional_consented_products: ['auth'],
-    };
-
-    const response = await fetch(`${PLAID_BASE_URL}/link/token/create`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      logError('plaid/link-token', JSON.stringify(data));
-      return res.status(response.status).json({
-        status: 'error',
-        message: data.error_message || 'Failed to create Plaid link token.',
-      });
-    }
-
-    const tokenId = crypto.randomUUID();
-    const encryptedLinkToken = encrypt(data.link_token);
-    const now = nowUTC();
-
-    await pool.query(
-      `INSERT INTO bank_tokens (token_id, user_id, link_token, link_token_expiry, link_request_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [tokenId, userId, encryptedLinkToken, toMySQLTimestamp(new Date(data.expiration)), data.request_id, now, now]
-    );
+    const data = await plaidService.createLinkToken(userId);
+    const tokenId = await bankTokenService.insertLinkToken(userId, data.link_token, data.expiration, data.request_id);
 
     debug('plaid/link-token created', { userId, tokenId });
 
@@ -87,9 +36,7 @@ router.post(
 
 /**
  * POST /api/v1/plaid/exchange-token
- * Exchanges a public token for a Plaid access token, then stores the
- * access token (AES-encrypted) in the bank_tokens table for the user.
- * Requires Bearer JWT in Authorization header.
+ * Exchanges a public token for a Plaid access token and stores it encrypted.
  */
 router.post(
   '/exchange-token',
@@ -108,65 +55,162 @@ router.post(
     const { userId } = req.user;
     const { public_token: publicToken, token_id: tokenId } = req.body;
 
-    const existing = await pool.query(
-      'SELECT id, access_token FROM bank_tokens WHERE token_id = ? AND user_id = ?',
-      [tokenId, userId]
-    );
-    if (existing.rows.length === 0) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Bank token record not found.',
-      });
+    const existing = await bankTokenService.findByTokenAndUser(tokenId, userId);
+    if (!existing) {
+      return res.status(404).json({ status: 'error', message: 'Bank token record not found.' });
     }
-    if (existing.rows[0].access_token) {
-      return res.status(409).json({
-        status: 'error',
-        message: 'This token has already been exchanged.',
-      });
+    if (existing.access_token) {
+      return res.status(409).json({ status: 'error', message: 'This token has already been exchanged.' });
     }
 
-    if (!PLAID_CLIENT_ID || !PLAID_SECRET) {
-      logError('plaid/exchange-token', 'Missing PLAID_CLIENT_ID or PLAID_SECRET env vars');
-      return res.status(500).json({
-        status: 'error',
-        message: 'Plaid integration is not configured.',
-      });
+    const data = await plaidService.exchangePublicToken(publicToken);
+    await bankTokenService.storeAccessToken(tokenId, userId, data.item_id, data.access_token, data.request_id);
+
+    const accountsData = await plaidService.getAccounts(data.access_token);
+    if (accountsData.accounts && accountsData.accounts.length > 0) {
+      await bankTokenService.insertUserBankAccounts(userId, data.item_id, accountsData.accounts);
     }
 
-    const response = await fetch(`${PLAID_BASE_URL}/item/public_token/exchange`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        client_id: PLAID_CLIENT_ID,
-        secret: PLAID_SECRET,
-        public_token: publicToken,
-      }),
-    });
+    await bankTokenService.markBankLinked(userId);
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      logError('plaid/exchange-token', JSON.stringify(data));
-      return res.status(response.status).json({
-        status: 'error',
-        message: data.error_message || 'Failed to exchange public token.',
-      });
-    }
-
-    const encryptedAccessToken = encrypt(data.access_token);
-    const encryptedItemId = encrypt(data.item_id);
-    const now = nowUTC();
-
-    await pool.query(
-      `UPDATE bank_tokens SET item_id = ?, access_token = ?, exchange_request_id = ?, updated_at = ? WHERE token_id = ? AND user_id = ?`,
-      [encryptedItemId, encryptedAccessToken, data.request_id, now, tokenId, userId]
-    );
-
-    debug('plaid/exchange-token stored', { userId, tokenId });
+    debug('plaid/exchange-token stored', { userId, tokenId, accountCount: accountsData.accounts?.length || 0 });
 
     return res.status(200).json({
       status: 'success',
       message: 'Bank account linked successfully.',
+    });
+  })
+);
+
+/**
+ * GET /api/v1/plaid/accounts
+ * Retrieves account details for all items linked to the authenticated user.
+ */
+router.get(
+  '/accounts',
+  requireAuth(),
+  asyncHandler(async (req, res) => {
+    const { userId } = req.user;
+
+    const tokenRows = await bankTokenService.getLatestTokensPerItem(userId);
+
+    if (tokenRows.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        accounts: [],
+        message: 'No linked bank accounts found.',
+      });
+    }
+
+    const accounts = [];
+
+    for (const row of tokenRows) {
+      const { itemId, accessToken } = bankTokenService.decryptTokenRow(row);
+
+      try {
+        const data = await plaidService.getAccounts(accessToken);
+        if (data.accounts) {
+          accounts.push(...data.accounts);
+        }
+      } catch (err) {
+        logError('plaid/accounts', `Failed for item ${itemId}: ${err.message}`);
+      }
+    }
+
+    debug('plaid/accounts retrieved', { userId, accountCount: accounts.length });
+
+    return res.status(200).json({
+      status: 'success',
+      accounts,
+    });
+  })
+);
+
+/**
+ * GET /api/v1/plaid/linked-accounts
+ * Returns all linked bank accounts for the authenticated user from our DB.
+ */
+router.get(
+  '/linked-accounts',
+  requireAuth(),
+  asyncHandler(async (req, res) => {
+    const { userId } = req.user;
+
+    const accounts = await bankTokenService.getLinkedAccounts(userId);
+
+    debug('plaid/linked-accounts fetched', { userId, count: accounts.length });
+
+    return res.status(200).json({
+      status: 'success',
+      accounts,
+    });
+  })
+);
+
+/**
+ * POST /api/v1/plaid/investment-account
+ * Marks a specific account as the investment account for the user.
+ * Any previously marked investment account is unset.
+ */
+router.post(
+  '/investment-account',
+  requireAuth(),
+  [
+    body('account_id').isString().trim().notEmpty().withMessage('account_id is required'),
+  ],
+  asyncHandler(async (req, res) => {
+    const errs = validationResult(req);
+    if (!errs.isEmpty()) {
+      const first = errs.array()[0];
+      return res.status(400).json({ status: 'error', message: first.msg });
+    }
+
+    const { userId } = req.user;
+    const { account_id: accountId } = req.body;
+
+    const updated = await bankTokenService.setInvestmentAccount(userId, accountId);
+
+    if (!updated) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Account not found for this user.',
+      });
+    }
+
+    debug('plaid/investment-account set', { userId });
+
+    return res.status(200).json({
+      status: 'success',
+      message: 'Investment account updated successfully.',
+    });
+  })
+);
+
+/**
+ * POST /api/v1/plaid/transactions/sync
+ * Syncs transactions for all linked items, calculates rolling-month
+ * credits/debits per account, and persists summaries to DB.
+ */
+router.post(
+  '/transactions/sync',
+  requireAuth(),
+  asyncHandler(async (req, res) => {
+    const { userId } = req.user;
+
+    const result = await syncUserTransactions(userId);
+
+    if (!result.synced) {
+      return res.status(200).json({
+        status: 'success',
+        accounts: [],
+        message: result.message,
+      });
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      month: result.month,
+      accounts: result.accounts,
     });
   })
 );

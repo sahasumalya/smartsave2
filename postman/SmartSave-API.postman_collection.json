@@ -353,7 +353,57 @@
               "raw": "{\n  \"public_token\": \"public-sandbox-bbb6c66a-5609-4558-b7cd-a20ce4d5d9a0\",\n  \"token_id\": \"{{plaidTokenId}}\"\n}"
             },
             "url": "{{baseUrl}}/api/v1/plaid/exchange-token",
-            "description": "Exchanges the public_token from Plaid Link for a permanent access token. Requires token_id (UUID) from Create Link Token. Encrypts both access_token and item_id (AES-256-GCM) and updates the same bank_tokens row. Rejects if the token has already been exchanged (409)."
+            "description": "Exchanges the public_token from Plaid Link for a permanent access token. Also fetches account details from Plaid and persists them (encrypted) to user_bank_accounts, and sets is_bank_linked=true on the user profile. Rejects if the token has already been exchanged (409)."
+          }
+        },
+        {
+          "name": "Get Accounts (Live from Plaid)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/plaid/accounts",
+            "description": "Fetches account details in real-time from Plaid for all linked items. Returns a flat array of accounts with balances. No body required."
+          }
+        },
+        {
+          "name": "Get Linked Accounts (from DB)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/plaid/linked-accounts",
+            "description": "Returns all linked bank accounts stored in our DB (populated during token exchange). No Plaid call made. Returns decrypted name, mask, account type, and the encrypted accountId (opaque reference). Also includes isInvestmentAccount flag."
+          }
+        },
+        {
+          "name": "Set Investment Account",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"account_id\": \"ENCRYPTED_ACCOUNT_ID_FROM_LINKED_ACCOUNTS\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/plaid/investment-account",
+            "description": "Marks the specified account as the user's investment account. Use the encrypted accountId from Get Linked Accounts. Any previously marked investment account is automatically unset (one per user)."
+          }
+        },
+        {
+          "name": "Sync Transactions",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/plaid/transactions/sync",
+            "description": "Syncs transactions for all linked items via Plaid /transactions/sync (cursor-based pagination). Filters to current rolling month, calculates per-account credits/debits, and persists to monthly_account_summary. Subsequent calls fetch only incremental updates."
           }
         }
       ]

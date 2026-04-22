@@ -19,6 +19,7 @@ const usersRoutes = require('./routes/users');
 const paymentsRoutes = require('./routes/payments');
 const investmentsRoutes = require('./routes/investments');
 const plaidRoutes = require('./routes/plaid');
+const { scheduleMonthlyTransactionSync } = require('./cron/monthlyTransactionSync');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -51,4 +52,5 @@ app.use(errorHandler);
 
 app.listen(PORT, () => {
   info(`Server running at http://localhost:${PORT}`);
+  //scheduleMonthlyTransactionSync();
 });

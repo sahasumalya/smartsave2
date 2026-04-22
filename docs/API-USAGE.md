@@ -346,7 +346,8 @@ No body.
       "email": "jane.doe@example.com",
       "phoneNumber": "+1234567890",
       "dateOfBirth": "1995-06-15",
-      "profileImageUrl": "https://bucket.s3.us-east-1.amazonaws.com/profile-images/uuid.jpg"
+      "profileImageUrl": "https://bucket.s3.us-east-1.amazonaws.com/profile-images/uuid.jpg",
+      "isBankLinked": true
     },
     "investments": [
       { "assetId": "EQUITY_FUND_01", "name": "Global Equity Fund", "percentage": 60 }
@@ -573,6 +574,8 @@ No body required. The `userId` is extracted from the JWT.
 2. Calls Plaid's `/item/public_token/exchange` to get a permanent `access_token` and `item_id`.
 3. Encrypts both the `access_token` and `item_id` with **AES-256-GCM**.
 4. Updates the same `bank_tokens` row (from the link-token step) with the encrypted values and the Plaid `request_id`.
+5. Calls Plaid's `/accounts/get` with the new access token and persists each account into `user_bank_accounts` (account_id, name, and mask are **AES-256 encrypted**; type/subtype stored in plaintext).
+6. Sets `is_bank_linked = true` on the user's profile.
 
 **Success (200):**
 ```json
@@ -592,6 +595,114 @@ No body required. The `userId` is extracted from the JWT.
 
 ---
 
+### Get accounts from Plaid (live)
+
+**GET** `/api/v1/plaid/accounts`  
+**Auth:** Required – `Authorization: Bearer <accessToken>`
+
+No body. Iterates through all linked items for the user, decrypts each access token, and calls Plaid's `/accounts/get` in real-time. Returns a flat array of all accounts across all items.
+
+**Success (200):**
+```json
+{
+  "status": "success",
+  "accounts": [
+    {
+      "account_id": "BxBXxLj1m4HMXBm9WZZmCWVbPjX16EHwv99vp",
+      "balances": { "available": 110.94, "current": 110.94, "iso_currency_code": "USD", "limit": null },
+      "mask": "0000",
+      "name": "Plaid Checking",
+      "official_name": "Plaid Gold Standard 0% Interest Checking",
+      "subtype": "checking",
+      "type": "depository"
+    }
+  ]
+}
+```
+
+---
+
+### Get linked accounts from DB
+
+**GET** `/api/v1/plaid/linked-accounts`  
+**Auth:** Required – `Authorization: Bearer <accessToken>`
+
+No body. Returns all accounts persisted in the `user_bank_accounts` table (populated during token exchange). No external Plaid call is made. Encrypted fields (name, mask) are decrypted in the response. The `accountId` is returned in its encrypted form (opaque reference).
+
+**Success (200):**
+```json
+{
+  "status": "success",
+  "accounts": [
+    {
+      "accountId": "Gw9NGxfk9fK4fRDjFC4w...",
+      "name": "Plaid Checking",
+      "accountType": "depository",
+      "accountSubtype": "checking",
+      "mask": "0000",
+      "isInvestmentAccount": false
+    }
+  ]
+}
+```
+
+---
+
+### Set investment account
+
+**POST** `/api/v1/plaid/investment-account`  
+**Auth:** Required – `Authorization: Bearer <accessToken>`
+
+**Body:**
+```json
+{
+  "account_id": "Gw9NGxfk9fK4fRDjFC4w..."
+}
+```
+- **account_id** – The encrypted `accountId` returned by **Get Linked Accounts**.
+- Marks the specified account as the user's investment account. Any previously marked investment account for the user is automatically unset (only one investment account per user).
+
+**Success (200):**
+```json
+{
+  "status": "success",
+  "message": "Investment account updated successfully."
+}
+```
+
+**Errors:**
+- **400** – Missing field: `"account_id is required"`
+- **404** – Account not found for user: `"Account not found for this user."`
+
+---
+
+### Sync transactions
+
+**POST** `/api/v1/plaid/transactions/sync`  
+**Auth:** Required – `Authorization: Bearer <accessToken>`
+
+No body. Syncs transactions for all linked items using Plaid's `/transactions/sync` (with cursor-based pagination). Filters to the current rolling month, calculates per-account credits and debits, and persists the summary to `monthly_account_summary`.
+
+**Success (200):**
+```json
+{
+  "status": "success",
+  "month": "2026-04-01",
+  "accounts": [
+    {
+      "account_id": "BxBXxLj1m4HMXBm9WZZmCWVbPjX16EHwv99vp",
+      "total_credits": 3500.00,
+      "total_debits": 1245.67
+    }
+  ]
+}
+```
+- **Plaid amount convention:** positive = money out (debit), negative = money in (credit).
+- Pending transactions are excluded.
+- The cursor is stored per user+item so subsequent calls only fetch incremental updates.
+
+---
+
 ### Typical client integration flow
 
 ```
@@ -600,7 +711,10 @@ No body required. The `userId` is extracted from the JWT.
 3. User selects their bank and authenticates in the Plaid UI
 4. Plaid Link returns a public_token to the client on success
 5. Client calls POST /api/v1/plaid/exchange-token { public_token, token_id }
-6. Server exchanges, encrypts, updates the same row  →  bank is linked
+6. Server exchanges, encrypts, stores access token, fetches accounts, marks bank linked
+7. Client calls GET /api/v1/plaid/linked-accounts to show the user's linked accounts
+8. User selects an investment account → POST /api/v1/plaid/investment-account
+9. Client calls POST /api/v1/plaid/transactions/sync to fetch monthly summaries
 ```
 
 ---
@@ -626,6 +740,10 @@ No body required. The `userId` is extracted from the JWT.
 | Set investments      | POST   | `/api/v1/investments/proportion`       | Bearer |
 | Plaid: create link token | POST | `/api/v1/plaid/link-token`            | Bearer |
 | Plaid: exchange public token | POST | `/api/v1/plaid/exchange-token`     | Bearer |
+| Plaid: get accounts (live) | GET | `/api/v1/plaid/accounts`              | Bearer |
+| Plaid: get linked accounts (DB) | GET | `/api/v1/plaid/linked-accounts`  | Bearer |
+| Plaid: set investment account | POST | `/api/v1/plaid/investment-account` | Bearer |
+| Plaid: sync transactions | POST | `/api/v1/plaid/transactions/sync`     | Bearer |
 | Health               | GET    | `/health`                              | No     |
 
 ---

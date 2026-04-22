@@ -572,7 +572,7 @@ router.get('/profile', requireAuth(), asyncHandler(async (req, res) => {
 
   try {
     const userRow = await pool.query(
-      'SELECT user_id, full_name, email, phone_number, date_of_birth, designation, profile_image_url FROM user_profile WHERE user_id = ?',
+      'SELECT user_id, full_name, email, phone_number, date_of_birth, designation, profile_image_url, is_bank_linked FROM user_profile WHERE user_id = ?',
       [userId]
     );
     if (userRow.rows.length === 0) {
@@ -661,6 +661,7 @@ router.get('/profile', requireAuth(), asyncHandler(async (req, res) => {
           dateOfBirth,
           designation: u.designation ?? null,
           profileImageUrl,
+          isBankLinked: Number(u.is_bank_linked) === 1,
         },
         investments: invRows.rows.map((r) => ({
           assetId: r.asset_id,
